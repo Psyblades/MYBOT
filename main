@@ -1,0 +1,176 @@
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.filters import Command
+import asyncio
+import os
+import sqlite3
+from datetime import datetime
+
+# Токен бота
+BOT_TOKEN = "7682470805:AAHb7x5Z5jLLWy0adF4haEflJptLHmQPi6s"
+
+# Создаем бота и диспетчер
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# Подключаем базу данных SQLite
+conn = sqlite3.connect("user_data.db")
+cursor = conn.cursor()
+
+# Создаем таблицы, если они ещё не созданы
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS messages (
+    user_id INTEGER,
+    username TEXT,
+    message TEXT,
+    date TIMESTAMP
+)
+""")
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS photos (
+    user_id INTEGER,
+    username TEXT,
+    file_path TEXT,
+    date TIMESTAMP
+)
+""")
+conn.commit()
+
+# Папка для сохранения данных
+BASE_PATH = r"C:\Users\HP OMEN\OneDrive\Рабочий стол\БАЗА"
+
+# Функция для создания папки с именем пользователя (если имя есть) или user_id (если имени нет)
+def create_user_directory(user):
+    username = user.username if user.username else str(user.id)
+    user_dir = os.path.join(BASE_PATH, username)
+    os.makedirs(user_dir, exist_ok=True)
+    return user_dir
+
+# Обработчик команды /start
+@dp.message(Command("start"))
+async def start_command(message: Message):
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Открыть карту", callback_data="open_card")],
+            [InlineKeyboardButton(text="Продать открытую карту", callback_data="sell_card")],
+            [InlineKeyboardButton(text="Справочная информация", callback_data="info")],
+        ]
+    )
+    await message.reply(
+        "Приветствую! 👋\n"
+        "Этот бот — ваш универсальный помощник. Здесь вы можете:\n\n"
+        "✅ Узнать необходимую информацию.\n"
+        "✅ Открыть карту ОТП Банка.\n"
+        "✅ Продать уже открытую карту.\n\n"
+        "Пожалуйста, выберите действие. ✅",
+        reply_markup=keyboard
+    )
+
+# Обработчик нажатий на Inline-кнопки
+@dp.callback_query()
+async def handle_callback(callback: CallbackQuery):
+    if callback.data == "open_card":
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Продолжить", callback_data="continue_application")],
+                [InlineKeyboardButton(text="Вернуться назад", callback_data="go_back")]
+            ]
+        )
+        await callback.message.reply(
+            "Для получения ОТП карты необходимо предоставить фото паспорта и страницу с пропиской по месту жительства (5-я страница паспорта)...",
+            reply_markup=keyboard
+        )
+
+    elif callback.data == "sell_card":
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Вернуться в меню", callback_data="go_back")],
+                [InlineKeyboardButton(text="Справочный раздел", callback_data="info")]
+            ]
+        )
+        await callback.message.reply(
+            "Для продажи открытой карты необходимо иметь пластиковую карту ОТП Банка, договориться о встрече с @joniboni_11 и иметь при себе оригинал паспорта, SIM-карту...",
+            reply_markup=keyboard
+        )
+
+    elif callback.data == "info":
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Вернуться назад", callback_data="go_back")]
+            ]
+        )
+        await callback.message.reply(
+            "ОТП Банк входит в международную финансовую Группу ОТП (OTP Group)...",
+            reply_markup=keyboard
+        )
+
+    elif callback.data == "continue_application":
+        application_form = (
+            "Для оформления карты потребуется следующая информация:\n\n"
+            "ФИО: \n"
+            "Номер телефона дропа: \n"
+            "Номер телефона дроповода: \n"
+            "Лицевая фотография паспорта\n"
+            "Фотография адреса регистрации (прописки)\n\n"
+            "❗Контакт для обратной связи - @joniboni_11\n"
+        )
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Начать оформление", callback_data="selled_cards")],
+                [InlineKeyboardButton(text="Кто такой дроп и дроповод?", callback_data="drop_info")],
+                [InlineKeyboardButton(text="Вернуться назад", callback_data="go_back")]
+            ]
+        )
+        await callback.message.reply(application_form, reply_markup=keyboard)
+
+    elif callback.data == "selled_cards":
+        await callback.message.reply(
+            "Пожалуйста, скопируйте форму выше и заполните её в соответствующем формате. \n"
+            "Отправьте фотографии и текстовую информацию одним сообщением. После отправки анкеты с вами свяжутся в личных сообщениях."
+        )
+
+    elif callback.data == "drop_info":
+        await callback.message.reply(
+            "✅ **Дроп** — это человек, который предоставляет свои данные (например, для регистрации карты), но не является конечным пользователем...\n"
+        )
+
+    elif callback.data == "go_back":
+        await start_command(callback.message)
+
+    await callback.answer()
+
+# Функция для сохранения сообщений
+@dp.message(lambda message: message.content_type == types.ContentType.TEXT)
+async def save_message(message: Message):
+    user_dir = create_user_directory(message.from_user)
+    cursor.execute("""
+    INSERT INTO messages (user_id, username, message, date)
+    VALUES (?, ?, ?, ?)
+    """, (message.from_user.id, message.from_user.username, message.text, datetime.now()))
+    conn.commit()
+    with open(f"{user_dir}/messages_log.txt", "a", encoding="utf-8") as file:
+        file.write(f"[{datetime.now()}] {message.text}\n")
+    await message.reply("Ваше сообщение сохранено. Ожидайте...")
+
+# Функция для сохранения фотографий
+@dp.message(lambda message: message.content_type == types.ContentType.PHOTO)
+async def save_photo(message: Message):
+    user_dir = create_user_directory(message.from_user)
+    photo = message.photo[-1]
+    file_info = await bot.get_file(photo.file_id)
+    local_file_path = f"{user_dir}/{photo.file_id}.jpg"
+    await bot.download_file(file_info.file_path, local_file_path)
+    cursor.execute("""
+    INSERT INTO photos (user_id, username, file_path, date)
+    VALUES (?, ?, ?, ?)
+    """, (message.from_user.id, message.from_user.username, local_file_path, datetime.now()))
+    conn.commit()
+    await message.reply("Ваше фото сохранено.")
+
+# Основной цикл запуска бота
+async def main():
+    print("Бот запущен...")
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
